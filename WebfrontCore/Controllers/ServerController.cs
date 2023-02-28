@@ -33,7 +33,7 @@ namespace WebfrontCore.Controllers
             {
                 Name = s.Hostname,
                 ID = s.EndPoint,
-                Port = s.Port,
+                Port = s.ListenPort,
                 Map = s.CurrentMap.Alias,
                 Game = (Reference.Game)s.GameName,
                 ClientCount = s.Clients.Count(client => client != null),

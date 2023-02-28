@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -63,7 +64,7 @@ namespace SharedLibraryCore
         {
             Password = config.Password;
             IP = config.IPAddress;
-            Port = config.Port;
+            ListenPort = config.Port;
             Manager = mgr;
 #pragma warning disable CS0612
             Logger = deprecatedLogger ?? throw new ArgumentNullException(nameof(deprecatedLogger));
@@ -86,8 +87,13 @@ namespace SharedLibraryCore
         }
 
         public long EndPoint => IPAddress.TryParse(IP, out _)
-            ? Convert.ToInt64($"{IP.Replace(".", "")}{Port}")
-            : $"{IP.Replace(".", "")}{Port}".GetStableHashCode();
+            ? Convert.ToInt64($"{IP.Replace(".", "")}{ListenPort}")
+            : $"{IP.Replace(".", "")}{ListenPort}".GetStableHashCode();
+
+        public long LegacyEndpoint => EndPoint;
+
+        public abstract long LegacyDatabaseId { get; }
+        public string Id => $"{ListenAddress}:{ListenPort}";
 
         // Objects
         public IManager Manager { get; protected set; }
@@ -100,6 +106,7 @@ namespace SharedLibraryCore
         public List<ChatInfo> ChatHistory { get; protected set; }
         public ClientHistoryInfo ClientHistory { get; }
         public Game GameName { get; set; }
+        public Reference.Game GameCode => (Reference.Game)GameName;
         public DateTime? MatchEndTime { get; protected set; }
         public DateTime? MatchStartTime { get; protected set; }
 
@@ -109,14 +116,17 @@ namespace SharedLibraryCore
             protected set => hostname = value;
         }
 
+        public string ServerName => Hostname;
+
         public string Website { get; protected set; }
         public string Gametype { get; set; }
 
-        public string GametypeName => DefaultSettings.Gametypes.FirstOrDefault(gt => gt.Game == GameName)?.Gametypes
+        public string GametypeName => DefaultSettings.Gametypes?.FirstOrDefault(gt => gt.Game == GameName)?.Gametypes
             ?.FirstOrDefault(gt => gt.Name == Gametype)?.Alias ?? Gametype;
 
         public string GamePassword { get; protected set; }
         public Map CurrentMap { get; set; }
+        public Map Map => CurrentMap;
 
         public int ClientNum
         {
@@ -125,9 +135,13 @@ namespace SharedLibraryCore
 
         public int MaxClients { get; protected set; }
         public List<EFClient> Clients { get; protected set; }
+
+        public IReadOnlyList<EFClient> ConnectedClients =>
+            new ReadOnlyCollection<EFClient>(GetClientsAsList());
         public string Password { get; }
         public bool Throttled { get; protected set; }
         public bool CustomCallback { get; protected set; }
+        public bool IsLegacyGameIntegrationEnabled => CustomCallback;
         public string WorkingDirectory { get; protected set; }
         public IRConConnection RemoteConnection { get; protected set; }
         public IRConParser RconParser { get; set; }
@@ -138,15 +152,17 @@ namespace SharedLibraryCore
 
         // Internal
         /// <summary>
-        ///     this is actually the hostname now
+        ///     this is actually the listen address now
         /// </summary>
         public string IP { get; protected set; }
+
+        public string ListenAddress => IP;
 
         public IPEndPoint ResolvedIpEndPoint { get; protected set; }
         public string Version { get; protected set; }
         public bool IsInitialized { get; set; }
 
-        public int Port { get; }
+        public int ListenPort { get; }
         public abstract Task Kick(string reason, EFClient target, EFClient origin, EFPenalty originalPenalty);
 
         /// <summary>
@@ -391,7 +407,7 @@ namespace SharedLibraryCore
 
         public override string ToString()
         {
-            return $"{IP}:{Port}";
+            return $"{IP}:{ListenPort}";
         }
 
         protected async Task<bool> ScriptLoaded()

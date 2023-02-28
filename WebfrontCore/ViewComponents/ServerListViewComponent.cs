@@ -68,7 +68,7 @@ namespace WebfrontCore.ViewComponents
                 {
                     Name = server.Hostname,
                     ID = server.EndPoint,
-                    Port = server.Port,
+                    Port = server.ListenPort,
                     Map = server.CurrentMap.Alias,
                     Game = (Reference.Game)server.GameName,
                     ClientCount = server.Clients.Count(client => client != null),
@@ -97,7 +97,7 @@ namespace WebfrontCore.ViewComponents
                     ExternalIPAddress = server.ResolvedIpEndPoint.Address.IsInternal() ? Program.Manager.ExternalIPAddress : server.IP,
                     ConnectProtocolUrl = server.EventParser.URLProtocolFormat.FormatExt(
                         server.ResolvedIpEndPoint.Address.IsInternal() ? Program.Manager.ExternalIPAddress : server.IP,
-                        server.Port)
+                        server.ListenPort)
                 });
             }
 

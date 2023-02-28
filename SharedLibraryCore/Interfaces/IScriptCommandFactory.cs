@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Data.Models;
+using SharedLibraryCore.Commands;
 
 namespace SharedLibraryCore.Interfaces
 {
@@ -22,7 +24,7 @@ namespace SharedLibraryCore.Interfaces
         /// <param name="supportedGames"></param>
         /// <returns></returns>
         IManagerCommand CreateScriptCommand(string name, string alias, string description, string permission,
-            bool isTargetRequired, IEnumerable<(string, bool)> args, Func<GameEvent, Task> executeAction,
-            Server.Game[] supportedGames);
+            bool isTargetRequired, IEnumerable<CommandArgument> args, Func<GameEvent, Task> executeAction,
+            IEnumerable<Reference.Game> supportedGames);
     }
 }

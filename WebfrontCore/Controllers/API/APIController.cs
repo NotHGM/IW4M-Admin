@@ -15,14 +15,13 @@ namespace WebfrontCore.Controllers.API
 
         public IActionResult Index()
         {
-            return Ok($"IW4MAdmin API");
+            return Ok("IW4MAdmin API");
         }
 
         [HttpGet]
-        public IActionResult Event(bool shouldConsume = true)
+        public IActionResult Event()
         {
-            var events = EventApi.GetEvents(shouldConsume);
-            return Json(events);
+            return NotFound("This API endpoint is no longer supported");
         }
 
         [HttpGet]
@@ -38,7 +37,7 @@ namespace WebfrontCore.Controllers.API
                     CurrentPlayers = server.GetClientsAsList().Count,
                     Map = server.CurrentMap,
                     GameMode = server.Gametype,
-                    server.Port,
+                    Port = server.ListenPort,
                     Game = server.GameName.ToString(),
                     Players = server.GetClientsAsList()
                         .Select(player => new
@@ -74,7 +73,7 @@ namespace WebfrontCore.Controllers.API
             return serverToRestart != null ?
             (IActionResult)Json(new
             {
-                port = serverToRestart.Port
+                port = serverToRestart.ListenPort
             }) :
             Unauthorized();
         }

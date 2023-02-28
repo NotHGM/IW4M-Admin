@@ -9,7 +9,7 @@ using SharedLibraryCore.Helpers;
 using SharedLibraryCore.Interfaces;
 using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -27,8 +27,12 @@ using Data.Models;
 using Data.Models.Server;
 using IW4MAdmin.Application.Alerts;
 using IW4MAdmin.Application.Commands;
+using IW4MAdmin.Plugins.Stats.Helpers;
 using Microsoft.EntityFrameworkCore;
 using SharedLibraryCore.Alerts;
+using SharedLibraryCore.Events.Management;
+using SharedLibraryCore.Events.Server;
+using SharedLibraryCore.Interfaces.Events;
 using static Data.Models.Client.EFClient;
 
 namespace IW4MAdmin
@@ -47,6 +51,8 @@ namespace IW4MAdmin
         private readonly IClientNoticeMessageFormatter _messageFormatter;
         private readonly ILookupCache<EFServer> _serverCache;
         private readonly CommandConfiguration _commandConfiguration;
+        private EFServer _cachedDatabaseServer;
+        private readonly StatManager _statManager;
 
         public IW4MServer(
             ServerConfiguration serverConfiguration,
@@ -70,6 +76,18 @@ namespace IW4MAdmin
             _messageFormatter = messageFormatter;
             _serverCache = serverCache;
             _commandConfiguration = commandConfiguration;
+            _statManager = serviceProvider.GetRequiredService<StatManager>();
+            
+            IGameServerEventSubscriptions.MonitoringStarted += async (gameEvent, token) =>
+            {
+                if (gameEvent.Server.Id != base.Id)
+                {
+                    return;
+                }
+
+                await EnsureServerAdded();
+                await _statManager.EnsureServerAdded(gameEvent.Server, token);
+            };
         }
 
         public override async Task<EFClient> OnClientConnected(EFClient clientFromLog)
@@ -106,7 +124,7 @@ namespace IW4MAdmin
 
             Clients[client.ClientNumber] = client;
             ServerLogger.LogDebug("End PreConnect for {client}", client.ToString());
-            var e = new GameEvent()
+            var e = new GameEvent
             {
                 Origin = client,
                 Owner = this,
@@ -114,6 +132,11 @@ namespace IW4MAdmin
             };
 
             Manager.AddEvent(e);
+            Manager.QueueEvent(new ClientStateInitializeEvent
+            {
+                Client = client,
+                Source = this,
+            });
             return client;
         }
 
@@ -208,10 +231,17 @@ namespace IW4MAdmin
                         ServerLogger.LogInformation("Executing command {Command} for {Client}", cmd.Name,
                             E.Origin.ToString());
                         await cmd.ExecuteAsync(E);
+                        Manager.QueueEvent(new ClientExecuteCommandEvent
+                        {
+                            Command = cmd,
+                            Client = E.Origin,
+                            Source = this,
+                            CommandText = E.Data
+                        });
                     }
 
-                    var pluginTasks = Manager.Plugins
-                        .Select(async plugin => await CreatePluginTask(plugin, E));
+                    var pluginTasks = Manager.Plugins.Where(plugin => !plugin.IsParser)
+                        .Select(plugin => CreatePluginTask(plugin, E));
                     
                     await Task.WhenAll(pluginTasks);
                 }
@@ -275,29 +305,7 @@ namespace IW4MAdmin
             {
                 ServerLogger.LogDebug("processing event of type {type}", E.Type);
 
-                if (E.Type == GameEvent.EventType.Start)
-                {
-                    var existingServer = (await _serverCache
-                        .FirstAsync(server => server.Id == EndPoint));
-
-                    var serverId = await GetIdForServer(E.Owner);
-
-                    if (existingServer == null)
-                    {
-                        var server = new EFServer()
-                        {
-                            Port = Port,
-                            EndPoint = ToString(),
-                            ServerId = serverId,
-                            GameName = (Reference.Game?)GameName,
-                            HostName = Hostname
-                        };
-
-                        await _serverCache.AddAsync(server);
-                    }
-                }
-                
-                else if (E.Type == GameEvent.EventType.ConnectionLost)
+                if (E.Type == GameEvent.EventType.ConnectionLost)
                 {
                     var exception = E.Extra as Exception;
                     ServerLogger.LogError(exception,
@@ -305,12 +313,12 @@ namespace IW4MAdmin
 
                     if (!Manager.GetApplicationSettings().Configuration().IgnoreServerConnectionLost)
                     {
-                        Console.WriteLine(loc["SERVER_ERROR_COMMUNICATION"].FormatExt($"{IP}:{Port}"));
+                        Console.WriteLine(loc["SERVER_ERROR_COMMUNICATION"].FormatExt($"{IP}:{ListenPort}"));
                         
                         var alert = Alert.AlertState.Build().OfType(E.Type.ToString())
                             .WithCategory(Alert.AlertCategory.Error)
                             .FromSource("System")
-                            .WithMessage(loc["SERVER_ERROR_COMMUNICATION"].FormatExt($"{IP}:{Port}"))
+                            .WithMessage(loc["SERVER_ERROR_COMMUNICATION"].FormatExt($"{IP}:{ListenPort}"))
                             .ExpiresIn(TimeSpan.FromDays(1));
                         
                         Manager.AlertManager.AddAlert(alert);
@@ -326,12 +334,12 @@ namespace IW4MAdmin
                     
                     if (!Manager.GetApplicationSettings().Configuration().IgnoreServerConnectionLost)
                     {
-                        Console.WriteLine(loc["MANAGER_CONNECTION_REST"].FormatExt($"{IP}:{Port}"));
+                        Console.WriteLine(loc["MANAGER_CONNECTION_REST"].FormatExt($"{IP}:{ListenPort}"));
                         
                         var alert = Alert.AlertState.Build().OfType(E.Type.ToString())
                             .WithCategory(Alert.AlertCategory.Information)
                             .FromSource("System")
-                            .WithMessage(loc["MANAGER_CONNECTION_REST"].FormatExt($"{IP}:{Port}"))
+                            .WithMessage(loc["MANAGER_CONNECTION_REST"].FormatExt($"{IP}:{ListenPort}"))
                             .ExpiresIn(TimeSpan.FromDays(1));
 
                         Manager.AlertManager.AddAlert(alert);
@@ -348,9 +356,18 @@ namespace IW4MAdmin
                 else if (E.Type == GameEvent.EventType.ChangePermission)
                 {
                     var newPermission = (Permission) E.Extra;
+                    var oldPermission = E.Target.Level;
                     ServerLogger.LogInformation("{origin} is setting {target} to permission level {newPermission}",
                         E.Origin.ToString(), E.Target.ToString(), newPermission);
                     await Manager.GetClientService().UpdateLevel(newPermission, E.Target, E.Origin);
+                    
+                    Manager.QueueEvent(new ClientPermissionChangeEvent
+                    {
+                        Client = E.Origin,
+                        Source = this, 
+                        OldPermission = oldPermission,
+                        NewPermission = newPermission
+                    });
                 }
 
                 else if (E.Type == GameEvent.EventType.Connect)
@@ -498,6 +515,12 @@ namespace IW4MAdmin
 
                     await Manager.GetPenaltyService().Create(newPenalty);
                     E.Target.SetLevel(Permission.Flagged, E.Origin);
+                    
+                    Manager.QueueEvent(new ClientPenaltyEvent
+                    {
+                        Client = E.Target,
+                        Penalty = newPenalty
+                    });
                 }
 
                 else if (E.Type == GameEvent.EventType.Unflag)
@@ -517,6 +540,12 @@ namespace IW4MAdmin
                     await Manager.GetPenaltyService().RemoveActivePenalties(E.Target.AliasLinkId, E.Target.NetworkId,
                         E.Target.GameName, E.Target.CurrentAlias?.IPAddress);
                     await Manager.GetPenaltyService().Create(unflagPenalty);
+                    
+                    Manager.QueueEvent(new ClientPenaltyRevokeEvent
+                    {
+                        Client = E.Target,
+                        Penalty = unflagPenalty
+                    });
                 }
 
                 else if (E.Type == GameEvent.EventType.Report)
@@ -552,6 +581,13 @@ namespace IW4MAdmin
                             Utilities.CurrentLocalization.LocalizationIndex["SERVER_AUTO_FLAG_REPORT"]
                                 .FormatExt(reportNum), Utilities.IW4MAdminClient(E.Owner));
                     }
+                    
+                    Manager.QueueEvent(new ClientPenaltyEvent
+                    {
+                        Client = E.Target,
+                        Penalty = newReport,
+                        Source = this
+                    });
                 }
 
                 else if (E.Type == GameEvent.EventType.TempBan)
@@ -726,6 +762,11 @@ namespace IW4MAdmin
                         {
                             MaxClients = int.Parse(dict["com_maxclients"]);
                         }
+                        
+                        else if (dict.ContainsKey("com_maxplayers"))
+                        {
+                            MaxClients = int.Parse(dict["com_maxplayers"]);
+                        }
 
                         if (dict.ContainsKey("mapname"))
                         {
@@ -770,34 +811,6 @@ namespace IW4MAdmin
                 {
                     E.Origin.UpdateTeam(E.Extra as string);
                 }
-                
-                else if (E.Type == GameEvent.EventType.MetaUpdated)
-                {
-                    if (E.Extra is "PersistentClientGuid")
-                    {
-                        var parts = E.Data.Split(",");
-
-                        if (parts.Length == 2 && int.TryParse(parts[0], out var high) &&
-                            int.TryParse(parts[1], out var low))
-                        {
-                            var guid = long.Parse(high.ToString("X") + low.ToString("X"), NumberStyles.HexNumber);
-
-                            var penalties = await Manager.GetPenaltyService()
-                                .GetActivePenaltiesByIdentifier(null, guid, (Reference.Game)GameName);
-                            var banPenalty =
-                                penalties.FirstOrDefault(penalty => penalty.Type == EFPenalty.PenaltyType.Ban);
-
-                            if (banPenalty is not null && E.Origin.Level != Permission.Banned)
-                            {
-                                ServerLogger.LogInformation(
-                                    "Banning {Client} as they have have provided a persistent clientId of {PersistentClientId}, which is banned",
-                                    E.Origin.ToString(), guid);
-                                E.Origin.Ban(loc["SERVER_BAN_EVADE"].FormatExt(guid),
-                                    Utilities.IW4MAdminClient(this), true);
-                            }
-                        }
-                    }
-                }
 
                 lock (ChatHistory)
                 {
@@ -816,6 +829,53 @@ namespace IW4MAdmin
 
                 return true;
             }
+        }
+
+        public async Task EnsureServerAdded()
+        {
+            var gameServer = await _serverCache
+                .FirstAsync(server => server.EndPoint == base.Id);
+            
+            if (gameServer == null)
+            {
+                gameServer = new EFServer
+                {
+                    Port = ListenPort,
+                    EndPoint = base.Id,
+                    ServerId = BuildLegacyDatabaseId(),
+                    GameName = (Reference.Game?)GameName,
+                    HostName = ServerName
+                };
+
+                await _serverCache.AddAsync(gameServer);
+            }
+
+            await using var context = _serviceProvider.GetRequiredService<IDatabaseContextFactory>()
+                .CreateContext(enableTracking: false);
+
+            context.Servers.Attach(gameServer);
+
+            // we want to set the gamename up if it's never been set, or it changed
+            if (!gameServer.GameName.HasValue || gameServer.GameName.Value != GameCode)
+            {
+                gameServer.GameName = GameCode;
+                context.Entry(gameServer).Property(property => property.GameName).IsModified = true;
+            }
+
+            if (gameServer.HostName == null || gameServer.HostName != ServerName)
+            {
+                gameServer.HostName = ServerName;
+                context.Entry(gameServer).Property(property => property.HostName).IsModified = true;
+            }
+
+            if (gameServer.IsPasswordProtected != !string.IsNullOrEmpty(GamePassword))
+            {
+                gameServer.IsPasswordProtected = !string.IsNullOrEmpty(GamePassword);
+                context.Entry(gameServer).Property(property => property.IsPasswordProtected).IsModified = true;
+            }
+
+            await context.SaveChangesAsync();
+            _cachedDatabaseServer = gameServer;
         }
 
         private async Task OnClientUpdate(EFClient origin)
@@ -907,22 +967,15 @@ namespace IW4MAdmin
         public override async Task<long> GetIdForServer(Server server = null)
         {
             server ??= this;
-            
-            if ($"{server.IP}:{server.Port.ToString()}" == "66.150.121.184:28965")
-            {
-                return 886229536;
-            }
 
-            // todo: this is not stable and will need to be migrated again...
-            long id = HashCode.Combine(server.IP, server.Port);
-            id = id < 0 ? Math.Abs(id) : id;
+            return (await _serverCache.FirstAsync(cachedServer =>
+                cachedServer.EndPoint == server.Id || cachedServer.ServerId == server.EndPoint)).ServerId;
+        }
 
-            var serverId = (await _serverCache
-                    .FirstAsync(_server => _server.ServerId == server.EndPoint ||
-                                                                    _server.EndPoint == server.ToString() ||
-                                                                    _server.ServerId == id))?.ServerId;
-
-            return !serverId.HasValue ? id : serverId.Value;
+        public long BuildLegacyDatabaseId()
+        {
+            long id = HashCode.Combine(ListenAddress, ListenPort);
+            return id < 0 ? Math.Abs(id) : id;
         }
 
         private void UpdateMap(string mapname)
@@ -981,7 +1034,7 @@ namespace IW4MAdmin
             {
                 await client.OnDisconnect();
 
-                var e = new GameEvent()
+                var e = new GameEvent
                 {
                     Type = GameEvent.EventType.Disconnect,
                     Owner = this,
@@ -992,6 +1045,15 @@ namespace IW4MAdmin
 
                 await e.WaitAsync(Utilities.DefaultCommandTimeout, new CancellationTokenRegistration().Token);
             }
+
+            using var tokenSource = new CancellationTokenSource();
+            tokenSource.CancelAfter(Utilities.DefaultCommandTimeout);
+
+            // todo: we can probably do this as a queued event
+            await IGameServerEventSubscriptions.InvokeMonitoringStoppedEvent(new MonitorStopEvent
+            {
+                Server = this
+            }, tokenSource.Token);
         }
 
         private DateTime _lastMessageSent = DateTime.Now;
@@ -1073,6 +1135,16 @@ namespace IW4MAdmin
                         Manager.AddEvent(gameEvent);
                     }
 
+                    if (polledClients[2].Any())
+                    {
+                        Manager.QueueEvent(new ClientDataUpdateEvent
+                        {
+                            Clients = new ReadOnlyCollection<EFClient>(polledClients[2]),
+                            Server = this,
+                            Source = this,
+                        });
+                    }
+
                     if (Throttled)
                     {
                         var gameEvent = new GameEvent
@@ -1084,6 +1156,12 @@ namespace IW4MAdmin
                         };
 
                         Manager.AddEvent(gameEvent);
+                        
+                        Manager.QueueEvent(new ConnectionRestoreEvent
+                        {
+                            Server = this,
+                            Source = this
+                        });
                     }
 
                     LastPoll = DateTime.Now;
@@ -1107,6 +1185,12 @@ namespace IW4MAdmin
                     };
 
                     Manager.AddEvent(gameEvent);
+                    Manager.QueueEvent(new ConnectionInterruptEvent
+                    {
+                        Server = this,
+                        Source = this
+                    });
+                    
                     return true;
                 }
                 finally
@@ -1157,7 +1241,7 @@ namespace IW4MAdmin
                     ServerLogger.LogError(e, "Unexpected exception occured during processing updates");
                 }
 
-                Console.WriteLine(loc["SERVER_ERROR_EXCEPTION"].FormatExt($"[{IP}:{Port}]"));
+                Console.WriteLine(loc["SERVER_ERROR_EXCEPTION"].FormatExt($"[{IP}:{ListenPort}]"));
                 return false;
             }
         }
@@ -1197,12 +1281,12 @@ namespace IW4MAdmin
                 ResolvedIpEndPoint =
                     new IPEndPoint(
                         (await Dns.GetHostAddressesAsync(IP)).First(address =>
-                            address.AddressFamily == AddressFamily.InterNetwork), Port);
+                            address.AddressFamily == AddressFamily.InterNetwork), ListenPort);
             }
             catch (Exception ex)
             {
-                ServerLogger.LogWarning(ex, "Could not resolve hostname or IP for RCon connection {IP}:{Port}", IP, Port);
-                ResolvedIpEndPoint = new IPEndPoint(IPAddress.Parse(IP), Port);
+                ServerLogger.LogWarning(ex, "Could not resolve hostname or IP for RCon connection {IP}:{Port}", IP, ListenPort);
+                ResolvedIpEndPoint = new IPEndPoint(IPAddress.Parse(IP), ListenPort);
             }
 
             RconParser = Manager.AdditionalRConParsers
@@ -1467,6 +1551,12 @@ namespace IW4MAdmin
                     .FormatExt(activeClient.Warnings, activeClient.Name, reason);
                 activeClient.CurrentServer.Broadcast(message);
             }
+            
+            Manager.QueueEvent(new ClientPenaltyEvent
+            {
+                Client = targetClient,
+                Penalty = newPenalty
+            });
         }
 
         public override async Task Kick(string reason, EFClient targetClient, EFClient originClient, EFPenalty previousPenalty)
@@ -1505,6 +1595,12 @@ namespace IW4MAdmin
                 ServerLogger.LogDebug("Executing tempban kick command for {ActiveClient}", activeClient.ToString());
                 await activeClient.CurrentServer.ExecuteCommandAsync(formattedKick);
             }
+
+            Manager.QueueEvent(new ClientPenaltyEvent
+            {
+                Client = targetClient,
+                Penalty = newPenalty
+            });
         }
 
         public override async Task TempBan(string reason, TimeSpan length, EFClient targetClient, EFClient originClient)
@@ -1538,6 +1634,12 @@ namespace IW4MAdmin
                 ServerLogger.LogDebug("Executing tempban kick command for {ActiveClient}", activeClient.ToString());
                 await activeClient.CurrentServer.ExecuteCommandAsync(formattedKick);
             }
+            
+            Manager.QueueEvent(new ClientPenaltyEvent
+            {
+                Client = targetClient,
+                Penalty = newPenalty
+            });
         }
 
         public override async Task Ban(string reason, EFClient targetClient, EFClient originClient, bool isEvade = false)
@@ -1573,6 +1675,12 @@ namespace IW4MAdmin
                     _messageFormatter.BuildFormattedMessage(RconParser.Configuration, newPenalty));
                 await activeClient.CurrentServer.ExecuteCommandAsync(formattedString);
             }
+            
+            Manager.QueueEvent(new ClientPenaltyEvent
+            {
+                Client = targetClient,
+                Penalty = newPenalty
+            });
         }
 
         public override async Task Unban(string reason, EFClient targetClient, EFClient originClient)
@@ -1594,6 +1702,12 @@ namespace IW4MAdmin
             await Manager.GetPenaltyService().RemoveActivePenalties(targetClient.AliasLink.AliasLinkId,
                 targetClient.NetworkId, targetClient.GameName, targetClient.CurrentAlias?.IPAddress);
             await Manager.GetPenaltyService().Create(unbanPenalty);
+            
+            Manager.QueueEvent(new ClientPenaltyRevokeEvent
+            {
+                Client = targetClient,
+                Penalty = unbanPenalty
+            });
         }
 
         public override void InitializeTokens()
@@ -1603,5 +1717,7 @@ namespace IW4MAdmin
             Manager.GetMessageTokens().Add(new MessageToken("NEXTMAP", (Server s) => SharedLibraryCore.Commands.NextMapCommand.GetNextMap(s, _translationLookup)));
             Manager.GetMessageTokens().Add(new MessageToken("ADMINS", (Server s) => Task.FromResult(ListAdminsCommand.OnlineAdmins(s, _translationLookup))));
         }
+
+        public override long LegacyDatabaseId => _cachedDatabaseServer.ServerId;
     }
 }

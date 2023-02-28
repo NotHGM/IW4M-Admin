@@ -28,7 +28,7 @@ namespace WebfrontCore.Controllers
                 : _appConfig.CommunityInformation.Name;
 
             var activeServers = _appConfig.Servers.Where(server =>
-                Manager.GetServers().FirstOrDefault(s => s.IP == server.IPAddress && s.Port == server.Port) != null);
+                Manager.GetServers().FirstOrDefault(s => s.IP == server.IPAddress && s.ListenPort == server.Port) != null);
 
             var info = new CommunityInfo
             {
@@ -37,8 +37,8 @@ namespace WebfrontCore.Controllers
                     config =>
                     {
                         var server = Manager.GetServers().FirstOrDefault(server =>
-                            server.IP == config.IPAddress && server.Port == config.Port);
-                        return (server.Hostname, server.EndPoint);
+                            server.IP == config.IPAddress && server.ListenPort == config.Port);
+                        return (Hostname: server.Hostname, server.EndPoint);
                     },
                     config => config.Rules),
                 CommunityInformation = _appConfig.CommunityInformation

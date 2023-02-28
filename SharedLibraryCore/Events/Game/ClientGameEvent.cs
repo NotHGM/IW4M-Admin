@@ -1,4 +1,5 @@
-﻿using SharedLibraryCore.Database.Models;
+﻿
+using SharedLibraryCore.Database.Models;
 
 namespace SharedLibraryCore.Events.Game;
 

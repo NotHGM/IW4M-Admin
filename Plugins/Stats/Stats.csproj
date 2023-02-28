@@ -15,11 +15,11 @@
     <LangVersion>Latest</LangVersion>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
-  
-  <ItemGroup>
-    <PackageReference Include="RaidMax.IW4MAdmin.SharedLibraryCore" Version="2023.2.11.1" PrivateAssets="All" />
-  </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\SharedLibraryCore\SharedLibraryCore.csproj" />
+  </ItemGroup>
+  
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
     <Exec Command="dotnet publish $(ProjectPath) -c $(ConfigurationName) -o $(ProjectDir)..\..\Build\Plugins --no-build --no-restore --no-dependencies" />
   </Target>

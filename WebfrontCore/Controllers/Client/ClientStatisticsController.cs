@@ -41,12 +41,12 @@ namespace WebfrontCore.Controllers
                 return NotFound();
             }
             
-            var server = Manager.GetServers().FirstOrDefault(server => server.ToString() == serverId);
+            var server = Manager.GetServers().FirstOrDefault(server => server.Id == serverId) as IGameServer;
             long? matchedServerId = null;
 
             if (server != null)
             {
-                matchedServerId = StatManager.GetIdForServer(server);
+                matchedServerId = server.LegacyDatabaseId;
             }
 
             hitInfo.TotalRankedClients = await _serverDataViewer.RankedClientsCountAsync(matchedServerId, token);

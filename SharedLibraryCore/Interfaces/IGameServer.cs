@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Data.Models;
 using SharedLibraryCore.Database.Models;
@@ -18,5 +19,18 @@ namespace SharedLibraryCore.Interfaces
         Task Kick(string reason, EFClient target, EFClient origin, EFPenalty previousPenalty = null);
         DateTime? MatchEndTime { get; }
         DateTime? MatchStartTime { get; }
+        IReadOnlyList<EFClient> ConnectedClients { get; }
+        Reference.Game GameCode { get; }
+        bool IsLegacyGameIntegrationEnabled { get; }
+        string Id { get; }
+        string ListenAddress { get; }
+        int ListenPort { get; }
+        string ServerName { get; }
+        string Gametype { get; }
+        string GamePassword { get; }
+        Map Map { get; }
+        [Obsolete("Use Id")]
+        long LegacyEndpoint { get; }
+        long LegacyDatabaseId { get; }
     }
 }

@@ -86,8 +86,6 @@ public class InteractionRegistration : IInteractionRegistration
         int? clientId = null,
         Reference.Game? game = null, CancellationToken token = default)
     {
-        return Enumerable.Empty<IInteractionData>();
-        // fixme: multi-threading is broken when dealing with script plugins
         return await GetInteractionsInternal(interactionPrefix, clientId, game, token);
     }
 

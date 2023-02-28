@@ -3,7 +3,7 @@ const vpnAllowListKey = 'Webfront::Nav::Admin::VPNAllowList';
 const vpnWhitelistKey = 'Webfront::Profile::VPNWhitelist';
 
 const init = (registerNotify, serviceResolver, config) => {
-    registerNotify('IManagementEventSubscriptions.ClientStateAuthorized', (authorizedEvent, _) => plugin.onClientAuthorized(authorizedEvent));
+    registerNotify('IManagementEventSubscriptions.ClientStateAuthorized', (authorizedEvent, token) => plugin.onClientAuthorized(authorizedEvent, token));
 
     plugin.onLoad(serviceResolver, config);
     return plugin;
@@ -146,8 +146,11 @@ const plugin = {
         }
     ],
 
-    onClientAuthorized: function(authorizeEvent) {
-        this.checkForVpn(authorizeEvent.client);
+    onClientAuthorized: function(authorizeEvent, token) {
+        if (authorizeEvent.client.isBot) {
+            return;
+        }
+        this.checkForVpn(authorizeEvent.client, token);
     },
 
     onLoad: function(serviceResolver, config) {
@@ -166,7 +169,7 @@ const plugin = {
         this.interactionRegistration.unregisterInteraction(vpnAllowListKey);
     },
 
-    checkForVpn: function(origin) {
+    checkForVpn: function(origin, token) {
         let exempt = false;
         // prevent players that are exempt from being kicked
         vpnExceptionIds.forEach(function(id) {
@@ -183,18 +186,23 @@ const plugin = {
 
         let usingVPN = false;
 
+        const threading = importNamespace('System.Threading');
+        const httpClient = new System.Net.Http.HttpClient();
+        const tokenSource = new threading.CancellationTokenSource(250);
+        const userAgent = `IW4MAdmin-${this.manager.getApplicationSettings().configuration().id}`;
+        httpClient.defaultRequestHeaders.add('User-Agent', userAgent);
+
         try {
-            const cl = new System.Net.Http.HttpClient();
-            const re = cl.getAsync(`https://api.xdefcon.com/proxy/check/?ip=${origin.IPAddressString}`).result;
-            const userAgent = `IW4MAdmin-${this.manager.getApplicationSettings().configuration().id}`;
-            cl.defaultRequestHeaders.add('User-Agent', userAgent);
-            const co = re.content;
-            const parsedJSON = JSON.parse(co.readAsStringAsync().result);
-            co.dispose();
-            re.dispose();
-            cl.dispose();
+            const response = httpClient.getAsync(`https://api.xdefcon.com/proxy/check/?ip=${origin.IPAddressString}`, tokenSource.token).getAwaiter().getResult();
+            const content = response.content;
+            const parsedJSON = JSON.parse(content.readAsStringAsync(tokenSource.token).getAwaiter().getResult());
+            response.dispose();
+            content.dispose();
+ 
             usingVPN = parsedJSON.success && parsedJSON.proxy;
         } catch (ex) {
+            tokenSource.dispose();
+            httpClient.dispose();
             this.logger.logWarning('There was a problem checking client IP for VPN {message}', ex.message);
         }
 

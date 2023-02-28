@@ -37,8 +37,9 @@ namespace IW4MAdmin.Application.Extensions
                     loggerConfig = loggerConfig.WriteTo.Console(
                             outputTemplate:
                             "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff} {Server} {Level:u3}] {Message:lj}{NewLine}{Exception}")
-                        .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-                        .MinimumLevel.Debug();
+                        //.MinimumLevel.Override("Microsoft", LogEventLevel.Debug)
+                        //.MinimumLevel.Debug();
+                        ;
                 }
 
                 _defaultLogger = loggerConfig.CreateLogger();
@@ -67,7 +68,7 @@ namespace IW4MAdmin.Application.Extensions
                 var connectionString = connectionStringBuilder.ToString();
 
                 services.AddSingleton(sp => (DbContextOptions) new DbContextOptionsBuilder<SqliteDatabaseContext>()
-                    .UseSqlite(connectionString)
+                    .UseSqlite(connectionString, opt => opt.CommandTimeout(120))
                     .UseLoggerFactory(sp.GetRequiredService<ILoggerFactory>())
                     .EnableSensitiveDataLogging().Options);
                 return services;

@@ -4,9 +4,9 @@ using System.Collections.Generic;
 using System.Reflection;
 using SharedLibraryCore.Interfaces;
 using System.Linq;
+using System.Text.RegularExpressions;
 using SharedLibraryCore;
 using IW4MAdmin.Application.API.Master;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharedLibraryCore.Configuration;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
@@ -20,13 +20,15 @@ namespace IW4MAdmin.Application.Misc
     public class PluginImporter : IPluginImporter
     {
         private IEnumerable<PluginSubscriptionContent> _pluginSubscription;
-        private static readonly string PLUGIN_DIR = "Plugins";
+        private static readonly string PluginDir = "Plugins";
+        private const string PluginV2Match = "^ *((?:var|const|let) +init)|function init";
         private readonly ILogger _logger;
         private readonly IRemoteAssemblyHandler _remoteAssemblyHandler;
         private readonly IMasterApi _masterApi;
         private readonly ApplicationConfiguration _appConfig;
 
-        public PluginImporter(ILogger<PluginImporter> logger, ApplicationConfiguration appConfig, IMasterApi masterApi, IRemoteAssemblyHandler remoteAssemblyHandler)
+        public PluginImporter(ILogger<PluginImporter> logger, ApplicationConfiguration appConfig, IMasterApi masterApi,
+            IRemoteAssemblyHandler remoteAssemblyHandler)
         {
             _logger = logger;
             _masterApi = masterApi;
@@ -38,25 +40,34 @@ namespace IW4MAdmin.Application.Misc
         /// discovers all the script plugins in the plugins dir
         /// </summary>
         /// <returns></returns>
-        public IEnumerable<IPlugin> DiscoverScriptPlugins()
+        public IEnumerable<(Type, string)> DiscoverScriptPlugins()
         {
-            var pluginDir = $"{Utilities.OperatingDirectory}{PLUGIN_DIR}{Path.DirectorySeparatorChar}";
+            var pluginDir = $"{Utilities.OperatingDirectory}{PluginDir}{Path.DirectorySeparatorChar}";
 
             if (!Directory.Exists(pluginDir))
             {
-                return Enumerable.Empty<IPlugin>();
+                return Enumerable.Empty<(Type, string)>();
             }
 
             var scriptPluginFiles =
                 Directory.GetFiles(pluginDir, "*.js").AsEnumerable().Union(GetRemoteScripts()).ToList();
 
-            _logger.LogDebug("Discovered {count} potential script plugins", scriptPluginFiles.Count);
-
-            return scriptPluginFiles.Select(fileName =>
+            var bothVersionPlugins = scriptPluginFiles.Select(fileName =>
             {
-                _logger.LogDebug("Discovered script plugin {fileName}", fileName);
-                return new ScriptPlugin(_logger, fileName);
+                _logger.LogDebug("Discovered script plugin {FileName}", fileName);
+                try
+                {
+                    var fileContents = File.ReadAllLines(fileName);
+                    var isValidV2 = fileContents.Any(line => Regex.IsMatch(line, PluginV2Match));
+                    return isValidV2 ? (typeof(IPluginV2), fileName) : (typeof(IPlugin), fileName);
+                }
+                catch
+                {
+                    return (typeof(IPlugin), fileName);
+                }
             }).ToList();
+
+            return bothVersionPlugins;
         }
 
         /// <summary>
@@ -65,7 +76,7 @@ namespace IW4MAdmin.Application.Misc
         /// <returns></returns>
         public (IEnumerable<Type>, IEnumerable<Type>, IEnumerable<Type>) DiscoverAssemblyPluginImplementations()
         {
-            var pluginDir = $"{Utilities.OperatingDirectory}{PLUGIN_DIR}{Path.DirectorySeparatorChar}";
+            var pluginDir = $"{Utilities.OperatingDirectory}{PluginDir}{Path.DirectorySeparatorChar}";
             var pluginTypes = Enumerable.Empty<Type>();
             var commandTypes = Enumerable.Empty<Type>();
             var configurationTypes = Enumerable.Empty<Type>();
@@ -94,7 +105,8 @@ namespace IW4MAdmin.Application.Misc
                                 return Enumerable.Empty<Type>();
                             }
                         })
-                        .Where(_assemblyType => _assemblyType.GetInterface(nameof(IPlugin), false) != null);
+                        .Where(_assemblyType => (_assemblyType.GetInterface(nameof(IPlugin), false) ?? _assemblyType.GetInterface(nameof(IPluginV2), false)) != null)
+                        .Where(assemblyType => !assemblyType.Namespace?.StartsWith(nameof(SharedLibraryCore)) ?? false);
 
                     _logger.LogDebug("Discovered {count} plugin implementations", pluginTypes.Count());
 
@@ -109,7 +121,8 @@ namespace IW4MAdmin.Application.Misc
                                 return Enumerable.Empty<Type>();
                             }
                         })
-                        .Where(_assemblyType => _assemblyType.IsClass && _assemblyType.BaseType == typeof(Command));
+                        .Where(_assemblyType => _assemblyType.IsClass && _assemblyType.BaseType == typeof(Command))
+                        .Where(assemblyType => !assemblyType.Namespace?.StartsWith(nameof(SharedLibraryCore)) ?? false);
 
                     _logger.LogDebug("Discovered {count} plugin commands", commandTypes.Count());
 
@@ -125,7 +138,8 @@ namespace IW4MAdmin.Application.Misc
                             }
                         })
                         .Where(asmType =>
-                            asmType.IsClass && asmType.GetInterface(nameof(IBaseConfiguration), false) != null);
+                            asmType.IsClass && asmType.GetInterface(nameof(IBaseConfiguration), false) != null)
+                        .Where(assemblyType => !assemblyType.Namespace?.StartsWith(nameof(SharedLibraryCore)) ?? false);
 
                     _logger.LogDebug("Discovered {count} configuration implementations", configurationTypes.Count());
                 }
@@ -155,8 +169,7 @@ namespace IW4MAdmin.Application.Misc
         {
             try
             {
-                if (_pluginSubscription == null)
-                    _pluginSubscription = _masterApi.GetPluginSubscription(Guid.Parse(_appConfig.Id), _appConfig.SubscriptionId).Result;
+                _pluginSubscription ??= _masterApi.GetPluginSubscription(Guid.Parse(_appConfig.Id), _appConfig.SubscriptionId).Result;
 
                 return _remoteAssemblyHandler.DecryptScripts(_pluginSubscription.Where(sub => sub.Type == PluginType.Script).Select(sub => sub.Content).ToArray());
             }

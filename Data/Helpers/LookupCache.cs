@@ -15,7 +15,7 @@ namespace Data.Helpers
         private readonly ILogger _logger;
         private readonly IDatabaseContextFactory _contextFactory;
         private Dictionary<long, T> _cachedItems;
-        private readonly SemaphoreSlim _onOperation = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _onOperation = new(1, 1);
 
         public LookupCache(ILogger<LookupCache<T>> logger, IDatabaseContextFactory contextFactory)
         {
@@ -35,7 +35,7 @@ namespace Data.Helpers
 
             if (existingItem != null)
             {
-                _logger.LogDebug("Cached item already added for {type} {id} {value}", typeof(T).Name, item.Id,
+                _logger.LogDebug("Cached item already added for {Type} {Id} {Value}", typeof(T).Name, item.Id,
                     item.Value);
                 _onOperation.Release();
                 return existingItem;
@@ -43,7 +43,7 @@ namespace Data.Helpers
 
             try
             {
-                _logger.LogDebug("Adding new {type} with {id} {value}", typeof(T).Name, item.Id, item.Value);
+                _logger.LogDebug("Adding new {Type} with {Id} {Value}", typeof(T).Name, item.Id, item.Value);
                 await using var context = _contextFactory.CreateContext();
                 context.Set<T>().Add(item);
                 await context.SaveChangesAsync();
@@ -52,7 +52,7 @@ namespace Data.Helpers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Could not add item to cache for {type}", typeof(T).Name);
+                _logger.LogError(ex, "Could not add item to cache for {Type}", typeof(T).Name);
                 throw new Exception("Could not add item to cache");
             }
             finally
@@ -66,22 +66,12 @@ namespace Data.Helpers
 
         public async Task<T> FirstAsync(Func<T, bool> query)
         {
-            await _onOperation.WaitAsync();
-
             try
             {
+                await _onOperation.WaitAsync();
                 var cachedResult = _cachedItems.Values.Where(query);
-
-                if (cachedResult.Any())
-                {
-                    return cachedResult.FirstOrDefault();
-                }
+                return cachedResult.FirstOrDefault();
             }
-
-            catch
-            {
-            }
-
             finally
             {
                 if (_onOperation.CurrentCount == 0)
@@ -89,8 +79,6 @@ namespace Data.Helpers
                     _onOperation.Release(1);
                 }
             }
-
-            return null;
         }
 
         public IEnumerable<T> GetAll()
@@ -107,7 +95,7 @@ namespace Data.Helpers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Could not initialize caching for {cacheType}", typeof(T).Name);
+                _logger.LogError(ex, "Could not initialize caching for {CacheType}", typeof(T).Name);
             }
         }
     }

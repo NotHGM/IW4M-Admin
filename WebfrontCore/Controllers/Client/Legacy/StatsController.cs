@@ -30,10 +30,11 @@ namespace IW4MAdmin.Plugins.Web.StatsWeb.Controllers
         private readonly IDatabaseContextFactory _contextFactory;
         private readonly StatsConfiguration _config;
         private readonly IServerDataViewer _serverDataViewer;
+        private readonly StatManager _statManager;
 
         public StatsController(ILogger<StatsController> logger, IManager manager, IResourceQueryHelper<ChatSearchQuery,
                 MessageResponse> resourceQueryHelper, ITranslationLookup translationLookup,
-            IDatabaseContextFactory contextFactory, StatsConfiguration config, IServerDataViewer serverDataViewer) : base(manager)
+            IDatabaseContextFactory contextFactory, StatsConfiguration config, IServerDataViewer serverDataViewer, StatManager statManager) : base(manager)
         {
             _logger = logger;
             _manager = manager;
@@ -42,6 +43,7 @@ namespace IW4MAdmin.Plugins.Web.StatsWeb.Controllers
             _contextFactory = contextFactory;
             _config = config;
             _serverDataViewer = serverDataViewer;
+            _statManager = statManager;
         }
 
         [HttpGet]
@@ -52,12 +54,12 @@ namespace IW4MAdmin.Plugins.Web.StatsWeb.Controllers
             ViewBag.Localization = _translationLookup;
             ViewBag.SelectedServerId = serverId;
             
-            var server = _manager.GetServers().FirstOrDefault(server => server.ToString() == serverId);
+            var server = _manager.GetServers().FirstOrDefault(server => server.Id == serverId) as IGameServer;
             long? matchedServerId = null;
 
             if (server != null)
             {
-                matchedServerId = StatManager.GetIdForServer(server);
+                matchedServerId = server.LegacyDatabaseId;
             }
             
             ViewBag.TotalRankedClients = await _serverDataViewer.RankedClientsCountAsync(matchedServerId, token);
@@ -68,7 +70,7 @@ namespace IW4MAdmin.Plugins.Web.StatsWeb.Controllers
                 {
                     Name = server.Hostname,
                     IPAddress = server.IP,
-                    Port = server.Port
+                    Port = server.ListenPort
                 }));
         }
 
@@ -81,16 +83,14 @@ namespace IW4MAdmin.Plugins.Web.StatsWeb.Controllers
                 serverId = null;
             }
 
-            var server = _manager.GetServers().FirstOrDefault(_server => _server.EndPoint == serverId);
-
-            if (server != null)
+            if (_manager.GetServers().FirstOrDefault(activeServer => activeServer.EndPoint == serverId) is IGameServer server)
             {
-                serverId = StatManager.GetIdForServer(server);
+                serverId = server.LegacyDatabaseId;
             }
 
             var results = _config?.EnableAdvancedMetrics ?? true
-                ? await Plugin.Manager.GetNewTopStats(offset, count, serverId)
-                : await Plugin.Manager.GetTopStats(offset, count, serverId);
+                ? await _statManager.GetNewTopStats(offset, count, serverId)
+                : await _statManager.GetTopStats(offset, count, serverId);
 
             // this returns an empty result so we know to stale the loader
             if (results.Count == 0 && offset > 0)

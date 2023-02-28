@@ -144,7 +144,7 @@ namespace WebfrontCore.Controllers
                     ingameClient.CurrentServer.ResolvedIpEndPoint.Address.IsInternal()
                         ? Program.Manager.ExternalIPAddress
                         : ingameClient.CurrentServer.IP,
-                    ingameClient.CurrentServer.Port),
+                    ingameClient.CurrentServer.ListenPort),
                 CurrentServerName = ingameClient?.CurrentServer?.Hostname,
                 GeoLocationInfo = await _geoLocationService.Locate(client.IPAddressString),
                 NoteMeta = string.IsNullOrWhiteSpace(note?.Note) ? null: note,

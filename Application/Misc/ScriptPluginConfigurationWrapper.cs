@@ -6,91 +6,88 @@ using System.Threading.Tasks;
 using IW4MAdmin.Application.Configuration;
 using Jint;
 using Jint.Native;
-using Newtonsoft.Json.Linq;
+using SharedLibraryCore.Interfaces;
 
-namespace IW4MAdmin.Application.Misc
+namespace IW4MAdmin.Application.Misc;
+
+public class ScriptPluginConfigurationWrapper
 {
-    public class ScriptPluginConfigurationWrapper
+    private readonly ScriptPluginConfiguration _config;
+    private readonly IConfigurationHandlerV2<ScriptPluginConfiguration> _configHandler;
+    private readonly Engine _scriptEngine;
+    private string _pluginName;
+
+    public ScriptPluginConfigurationWrapper(string pluginName, Engine scriptEngine, IConfigurationHandlerV2<ScriptPluginConfiguration> configHandler)
     {
-        private readonly BaseConfigurationHandler<ScriptPluginConfiguration> _handler;
-        private ScriptPluginConfiguration _config;
-        private readonly string _pluginName;
-        private readonly Engine _scriptEngine;
+        _pluginName = pluginName;
+        _scriptEngine = scriptEngine;
+        _configHandler = configHandler;
+        _config = configHandler.Get("ScriptPluginSettings", new ScriptPluginConfiguration()).GetAwaiter().GetResult();
+    }
 
-        public ScriptPluginConfigurationWrapper(string pluginName, Engine scriptEngine)
+    public void SetName(string name)
+    {
+        _pluginName = name;
+    }
+
+    public async Task SetValue(string key, object value)
+    {
+        var castValue = value;
+
+        if (value is double doubleValue)
         {
-            _handler = new BaseConfigurationHandler<ScriptPluginConfiguration>("ScriptPluginSettings");
-            _pluginName = pluginName;
-            _scriptEngine = scriptEngine;
+            castValue = AsInteger(doubleValue) ?? value;
         }
 
-        public async Task InitializeAsync()
+        if (value is object[] array && array.All(item => item is double d && AsInteger(d) != null))
         {
-            await _handler.BuildAsync();
-            _config = _handler.Configuration() ??
-                      (ScriptPluginConfiguration) new ScriptPluginConfiguration().Generate();
+            castValue = array.Select(item => AsInteger((double)item)).ToArray();
         }
 
-        private static int? AsInteger(double d)
+        if (!_config.ContainsKey(_pluginName))
         {
-            return int.TryParse(d.ToString(CultureInfo.InvariantCulture), out var parsed) ? parsed : (int?) null;
+            _config.Add(_pluginName, new Dictionary<string, object>());
         }
 
-        public async Task SetValue(string key, object value)
+        var plugin = _config[_pluginName];
+
+        if (plugin.ContainsKey(key))
         {
-            var castValue = value;
-
-            if (value is double d)
-            {
-                castValue = AsInteger(d) ?? value;
-            }
-
-            if (value is object[] array && array.All(item => item is double d && AsInteger(d) != null))
-            {
-                castValue = array.Select(item => AsInteger((double)item)).ToArray();
-            }
-
-            if (!_config.ContainsKey(_pluginName))
-            {
-                _config.Add(_pluginName, new Dictionary<string, object>());
-            }
-
-            var plugin = _config[_pluginName];
-
-            if (plugin.ContainsKey(key))
-            {
-                plugin[key] = castValue;
-            }
-
-            else
-            {
-                plugin.Add(key, castValue);
-            }
-
-            _handler.Set(_config);
-            await _handler.Save();
+            plugin[key] = castValue;
         }
 
-        public JsValue GetValue(string key)
+        else
         {
-            if (!_config.ContainsKey(_pluginName))
-            {
-                return JsValue.Undefined;
-            }
-
-            if (!_config[_pluginName].ContainsKey(key))
-            {
-                return JsValue.Undefined;
-            }
-
-            var item = _config[_pluginName][key];
-
-            if (item is JsonElement { ValueKind: JsonValueKind.Array } jElem)
-            {
-                item = jElem.Deserialize<List<dynamic>>();
-            }
-
-            return JsValue.FromObject(_scriptEngine, item);
+            plugin.Add(key, castValue);
         }
+
+        await _configHandler.Set(_config);
+    }
+
+    public JsValue GetValue(string key)
+    {
+        if (!_config.ContainsKey(_pluginName))
+        {
+            return JsValue.Undefined;
+        }
+
+        if (!_config[_pluginName].ContainsKey(key))
+        {
+            return JsValue.Undefined;
+        }
+
+        var item = _config[_pluginName][key];
+
+        if (item is JsonElement { ValueKind: JsonValueKind.Array } jElem)
+        {
+            item = jElem.Deserialize<List<dynamic>>();
+        }
+
+        return JsValue.FromObject(_scriptEngine, item);
+    }
+        
+    private static int? AsInteger(double value)
+    {
+        return int.TryParse(value.ToString(CultureInfo.InvariantCulture), out var parsed) ? parsed : null;
     }
 }

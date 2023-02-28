@@ -3,7 +3,10 @@ using SharedLibraryCore.Commands;
 using SharedLibraryCore.Configuration;
 using SharedLibraryCore.Interfaces;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
+using Data.Models;
 using Data.Models.Client;
 using Microsoft.Extensions.Logging;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
@@ -20,8 +23,8 @@ namespace IW4MAdmin.Application.Misc
 
         public ScriptCommand(string name, string alias, string description, bool isTargetRequired,
             EFClient.Permission permission,
-            CommandArgument[] args, Func<GameEvent, Task> executeAction, CommandConfiguration config,
-            ITranslationLookup layout, ILogger<ScriptCommand> logger, Server.Game[] supportedGames)
+            IEnumerable<CommandArgument> args, Func<GameEvent, Task> executeAction, CommandConfiguration config,
+            ITranslationLookup layout, ILogger<ScriptCommand> logger, IEnumerable<Reference.Game> supportedGames)
             : base(config, layout)
         {
             _executeAction = executeAction;
@@ -31,8 +34,8 @@ namespace IW4MAdmin.Application.Misc
             Description = description;
             RequiresTarget = isTargetRequired;
             Permission = permission;
-            Arguments = args;
-            SupportedGames = supportedGames;
+            Arguments = args.ToArray();
+            SupportedGames = supportedGames.Select(game => (Server.Game)game).ToArray();
         }
 
         public override async Task ExecuteAsync(GameEvent e)

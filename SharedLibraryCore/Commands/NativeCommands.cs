@@ -54,11 +54,10 @@ namespace SharedLibraryCore.Commands
             RequiresTarget = false;
         }
 
-        public override Task ExecuteAsync(GameEvent E)
+        public override async Task ExecuteAsync(GameEvent E)
         {
-            E.Owner.Manager.Restart();
+            await E.Owner.Manager.Restart();
             E.Origin.Tell(_translationLookup["COMMANDS_RESTART_SUCCESS"]);
-            return Task.CompletedTask;
         }
     }
 

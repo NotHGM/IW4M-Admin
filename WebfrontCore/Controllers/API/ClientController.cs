@@ -9,6 +9,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Data.Models;
+using Humanizer;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.Extensions.Logging;
@@ -90,6 +91,7 @@ namespace WebfrontCore.Controllers.API
                     Name = clientInfo.CleanedName,
                     Level = clientInfo.Level.ToLocalizedLevelName(),
                     NetworkId = clientInfo.NetworkId,
+                    GameName = clientInfo.GameName.ToString(),
                     Tag = metaResult?.Value,
                     FirstConnection = clientInfo.FirstConnection,
                     LastConnection = clientInfo.LastConnection,

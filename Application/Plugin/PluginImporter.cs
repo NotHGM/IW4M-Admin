@@ -5,6 +5,9 @@ using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using IW4MAdmin.Application.API.Master;
+#if DEBUG
+using Microsoft.Extensions.DependencyModel;
+#endif
 using Microsoft.Extensions.Logging;
 using SharedLibraryCore;
 using SharedLibraryCore.Configuration;
@@ -102,13 +105,27 @@ namespace IW4MAdmin.Application.Plugin
                 return (pluginTypes, commandTypes, configurationTypes);
             }
 
+#if DEBUG
+            var loadedAssemblies = AppDomain.CurrentDomain.GetAssemblies().Select(asm => asm.GetName().Name);
+            var references = DependencyContext.Default?.GetDefaultAssemblyNames().Select(x => x.Name) ?? [];
+            var validAssemblies = references.Except(loadedAssemblies)
+                .Where(asm => !asm.StartsWith("Microsoft"))
+                .Where(asm => !asm.StartsWith("System"))
+                .Distinct();
+            var reloadableAssemblies = validAssemblies.Select(Assembly.Load);
+#endif
+
             // we only want to load the most recent assembly in case of duplicates
-            var assemblies = dllFileNames.Select(Assembly.LoadFrom)
+            var assemblies = dllFileNames.Select(fileName => fileName).Select(Assembly.LoadFrom)
                 .Union(GetRemoteAssemblies())
+#if DEBUG
+                .Union(reloadableAssemblies)
+#endif
                 .GroupBy(assembly => assembly.FullName).Select(assembly =>
                     assembly.OrderByDescending(asm => asm.GetName().Version).First());
 
-            var eligibleAssemblyTypes = assemblies
+            var eligibleAssemblyTypes = assemblies.Concat(AppDomain.CurrentDomain.GetAssemblies()
+                    .Where(asm => !new[] { "IW4MAdmin", "SharedLibraryCore" }.Contains(asm.GetName().Name)))
                 .SelectMany(asm =>
                 {
                     try
@@ -122,7 +139,7 @@ namespace IW4MAdmin.Application.Plugin
                 }).Where(type =>
                     FilterTypes.Any(filterType => type.GetInterface(filterType.Name, false) != null) ||
                     (type.IsClass && FilterTypes.Contains(type.BaseType)));
-            
+
             foreach (var assemblyType in eligibleAssemblyTypes)
             {
                 var isPlugin =
@@ -193,7 +210,7 @@ namespace IW4MAdmin.Application.Plugin
 
             catch (Exception ex)
             {
-                _logger.LogWarning(ex,"Could not load remote scripts");
+                _logger.LogWarning(ex, "Could not load remote scripts");
                 return Enumerable.Empty<string>();
             }
         }

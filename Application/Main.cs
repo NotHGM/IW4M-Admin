@@ -38,6 +38,9 @@ using ILogger = Microsoft.Extensions.Logging.ILogger;
 using IW4MAdmin.Plugins.Stats.Client.Abstractions;
 using IW4MAdmin.Plugins.Stats.Client;
 using Microsoft.Extensions.Hosting;
+#if DEBUG
+using PluginDebugReference;
+#endif
 using Refit;
 using SharedLibraryCore.Interfaces.Events;
 using Stats.Client.Abstractions;
@@ -128,6 +131,10 @@ namespace IW4MAdmin.Application
             var logger = BuildDefaultLogger<Program>(new ApplicationConfiguration());
             Utilities.DefaultLogger = logger;
             logger.LogInformation("Begin IW4MAdmin startup. Version is {Version}", Version);
+            
+    #if DEBUG
+            StrongReferencesLoader.Load();
+    #endif
             
             try
             {

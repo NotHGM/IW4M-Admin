@@ -55,6 +55,7 @@
     <ProjectReference Include="..\Integrations\Cod\Integrations.Cod.csproj" />
     <ProjectReference Include="..\Integrations\Source\Integrations.Source.csproj" />
     <ProjectReference Include="..\Data\Data.csproj" />
+    <ProjectReference Include="..\PluginDebugReference\PluginDebugReference.csproj" Condition="'$(Configuration)'=='Debug'"/>
     <ProjectReference Include="..\SharedLibraryCore\SharedLibraryCore.csproj">
       <Private>true</Private>
     </ProjectReference>
@@ -73,8 +74,8 @@
     </None>
   </ItemGroup>
 
-  <Target Name="PreBuild" BeforeTargets="PreBuildEvent" Condition="'$(ConfigurationName)'=='Debug'">
+  <!--<Target Name="PreBuild" BeforeTargets="PreBuildEvent" Condition="'$(ConfigurationName)'=='Debug'">
     <Exec Command="powershell.exe $(ProjectDir)BuildScripts\PreBuild.ps1 $(SolutionDir) $(TargetDir)" />
-  </Target>
+  </Target>-->
   
 </Project>

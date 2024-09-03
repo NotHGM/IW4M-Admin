@@ -209,7 +209,7 @@ namespace IW4MAdmin.Application.EventParsers
                     // avoid parsing base script event (which has no viable properties) 
                     // and anticheat events as they are manually mapped.
                     // for performance as dynamic "Invoke" is relatively costly due
-                    if (isParseIgnoredEvent)
+                    if (!isParseIgnoredEvent)
                     {
                         createdEvent.ParseArguments();
                     }

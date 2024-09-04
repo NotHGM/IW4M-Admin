@@ -10,6 +10,7 @@ public class InfoResponse
     public MetricSnapshot<int> TotalRecentClients { get; set; }
 
     public MetricSnapshot<int?> MaxConcurrentClients { get; set; }
+    public TimeSpan Uptime { get; set; }
 }
 
 public class MetricSnapshot<T>

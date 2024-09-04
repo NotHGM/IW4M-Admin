@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,6 +31,7 @@ public class Info : BaseController
         var (totalClients, totalRecentClients) =
             await _serverDataViewer.ClientCountsAsync(duration, game, token);
         var (maxConcurrent, maxConcurrentTime) = await _serverDataViewer.MaxConcurrentClientsAsync(overPeriod: duration, token: token);
+        var uptime = DateTime.Now - Process.GetCurrentProcess().StartTime;
         var response = new InfoResponse
         {
             TotalTrackedClients = totalClients,
@@ -46,7 +48,8 @@ public class Info : BaseController
                 Value = totalRecentClients,
                 EndAt = DateTime.UtcNow,
                 StartAt = DateTime.UtcNow - duration
-            }
+            },
+            Uptime = uptime,
         };
 
         return Json(response);

@@ -384,6 +384,10 @@
         {
           "Name": "war",
           "Alias": "Team Deathmatch"
+        },
+        {
+          "Name": "aliens",
+          "Alias": "Extinction"
         }
       ]
     },
@@ -611,6 +615,14 @@
         {
           "Name": "twar",
           "Alias": "Momentum"
+        },
+        {
+          "Name": "horde",
+          "Alias": "Horde"
+        },
+        {
+          "Name": "zombies",
+          "Alias": "Zombies"
         }
       ]
     },
@@ -2108,6 +2120,22 @@
         {
           "Alias": "Urban",
           "Name": "mp_urban"
+        },
+        {
+          "Alias": "Outbreak",
+          "Name": "mp_zombie_lab"
+        },
+        {
+          "Alias": "Infection",
+          "Name": "mp_zombie_brg"
+        },
+        {
+          "Alias": "Carrier",
+          "Name": "mp_zombie_ark"
+        },
+        {
+          "Alias": "Descent",
+          "Name": "mp_zombie_h2o"
         }
       ]
     },
